@@ -6,7 +6,7 @@
 //
 //		import (
 //			"time"
-//			tb "gopkg.in/tucnak/telebot.v2"
+//			tb "github.com/maxposter/telebot"
 //		)
 //
 //		func main() {
