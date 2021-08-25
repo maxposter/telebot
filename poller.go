@@ -1,7 +1,6 @@
 package telebot
 
 import (
-	"sync"
 	"time"
 )
 
@@ -95,11 +94,10 @@ type LongPoller struct {
 
 // Poll does long polling.
 func (p *LongPoller) Poll(b *Bot, dest chan Update, stop chan struct{}) {
-	var wg sync.WaitGroup
 	for {
 		select {
 		case <-stop:
-			wg.Wait()
+			b.UpdatesWg.Wait()
 			close(dest)
 			return
 		default:
@@ -111,11 +109,10 @@ func (p *LongPoller) Poll(b *Bot, dest chan Update, stop chan struct{}) {
 			b.debug(ErrCouldNotUpdate)
 			continue
 		}
-		wg.Add(len(updates))
+		b.UpdatesWg.Add(len(updates))
 
 		for _, update := range updates {
 			p.LastUpdateID = update.ID
-			update.wg = &wg
 			dest <- update
 		}
 	}

@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-	"sync"
 
 	"github.com/pkg/errors"
 )
@@ -31,9 +30,9 @@ func (b *Bot) deferDebug() {
 	}
 }
 
-func (b *Bot) runHandler(handler func(), wg *sync.WaitGroup) {
+func (b *Bot) runHandler(handler func()) {
 	f := func() {
-		defer wg.Done()
+		defer b.UpdatesWg.Done()
 		defer b.deferDebug()
 		handler()
 	}
