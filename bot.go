@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/pkg/errors"
 )
@@ -131,6 +132,7 @@ type Update struct {
 	PollAnswer         *PollAnswer         `json:"poll_answer,omitempty"`
 	MyChatMember       *ChatMemberUpdated  `json:"my_chat_member,omitempty"`
 	ChatMember         *ChatMemberUpdated  `json:"chat_member,omitempty"`
+	wg                 *sync.WaitGroup
 }
 
 // Command represents a bot command.
@@ -204,11 +206,12 @@ func (b *Bot) Stop() {
 // ProcessUpdate processes a single incoming update.
 // A started bot calls this function automatically.
 func (b *Bot) ProcessUpdate(upd Update) {
+	wg := upd.wg
 	if upd.Message != nil {
 		m := upd.Message
 
 		if m.PinnedMessage != nil {
-			b.handle(OnPinned, m)
+			b.handle(OnPinned, m, wg)
 			return
 		}
 
@@ -229,38 +232,38 @@ func (b *Bot) ProcessUpdate(upd Update) {
 				}
 
 				m.Payload = match[0][5]
-				if b.handle(command, m) {
+				if b.handle(command, m, wg) {
 					return
 				}
 			}
 
 			// 1:1 satisfaction
-			if b.handle(m.Text, m) {
+			if b.handle(m.Text, m, wg) {
 				return
 			}
 
-			b.handle(OnText, m)
+			b.handle(OnText, m, wg)
 			return
 		}
 
-		if b.handleMedia(m) {
+		if b.handleMedia(m, wg) {
 			return
 		}
 
 		if m.Invoice != nil {
-			b.handle(OnInvoice, m)
+			b.handle(OnInvoice, m, wg)
 			return
 		}
 
 		if m.Payment != nil {
-			b.handle(OnPayment, m)
+			b.handle(OnPayment, m, wg)
 			return
 		}
 
 		wasAdded := (m.UserJoined != nil && m.UserJoined.ID == b.Me.ID) ||
 			(m.UsersJoined != nil && isUserInList(b.Me, m.UsersJoined))
 		if m.GroupCreated || m.SuperGroupCreated || wasAdded {
-			b.handle(OnAddedToGroup, m)
+			b.handle(OnAddedToGroup, m, wg)
 			return
 		}
 
@@ -269,33 +272,33 @@ func (b *Bot) ProcessUpdate(upd Update) {
 				// Shallow copy message to prevent data race in async mode
 				mm := *m
 				mm.UserJoined = &m.UsersJoined[index]
-				b.handle(OnUserJoined, &mm)
+				b.handle(OnUserJoined, &mm, wg)
 			}
 			return
 		}
 
 		if m.UserJoined != nil {
-			b.handle(OnUserJoined, m)
+			b.handle(OnUserJoined, m, wg)
 			return
 		}
 
 		if m.UserLeft != nil {
-			b.handle(OnUserLeft, m)
+			b.handle(OnUserLeft, m, wg)
 			return
 		}
 
 		if m.NewGroupTitle != "" {
-			b.handle(OnNewGroupTitle, m)
+			b.handle(OnNewGroupTitle, m, wg)
 			return
 		}
 
 		if m.NewGroupPhoto != nil {
-			b.handle(OnNewGroupPhoto, m)
+			b.handle(OnNewGroupPhoto, m, wg)
 			return
 		}
 
 		if m.GroupPhotoDeleted {
-			b.handle(OnGroupPhotoDeleted, m)
+			b.handle(OnGroupPhotoDeleted, m, wg)
 			return
 		}
 
@@ -306,7 +309,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 					panic("telebot: migration handler is bad")
 				}
 
-				b.runHandler(func() { handler(m.Chat.ID, m.MigrateTo) })
+				b.runHandler(func() { handler(m.Chat.ID, m.MigrateTo) }, wg)
 			}
 
 			return
@@ -319,7 +322,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 					panic("telebot: voice chat started handler is bad")
 				}
 
-				b.runHandler(func() { handler(m) })
+				b.runHandler(func() { handler(m) }, wg)
 			}
 
 			return
@@ -332,7 +335,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 					panic("telebot: voice chat ended handler is bad")
 				}
 
-				b.runHandler(func() { handler(m) })
+				b.runHandler(func() { handler(m) }, wg)
 			}
 
 			return
@@ -345,7 +348,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 					panic("telebot: voice chat participants invited handler is bad")
 				}
 
-				b.runHandler(func() { handler(m) })
+				b.runHandler(func() { handler(m) }, wg)
 			}
 
 			return
@@ -358,7 +361,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 					panic("telebot: proximity alert handler is bad")
 				}
 
-				b.runHandler(func() { handler(m) })
+				b.runHandler(func() { handler(m) }, wg)
 			}
 
 			return
@@ -371,7 +374,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 					panic("telebot: auto delete timer handler is bad")
 				}
 
-				b.runHandler(func() { handler(m) })
+				b.runHandler(func() { handler(m) }, wg)
 			}
 
 			return
@@ -384,7 +387,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 					panic("telebot: voice chat scheduled is bad")
 				}
 
-				b.runHandler(func() { handler(m) })
+				b.runHandler(func() { handler(m) }, wg)
 			}
 
 			return
@@ -392,7 +395,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 	}
 
 	if upd.EditedMessage != nil {
-		b.handle(OnEdited, upd.EditedMessage)
+		b.handle(OnEdited, upd.EditedMessage, wg)
 		return
 	}
 
@@ -400,16 +403,16 @@ func (b *Bot) ProcessUpdate(upd Update) {
 		m := upd.ChannelPost
 
 		if m.PinnedMessage != nil {
-			b.handle(OnPinned, m)
+			b.handle(OnPinned, m, wg)
 			return
 		}
 
-		b.handle(OnChannelPost, upd.ChannelPost)
+		b.handle(OnChannelPost, upd.ChannelPost, wg)
 		return
 	}
 
 	if upd.EditedChannelPost != nil {
-		b.handle(OnEditedChannelPost, upd.EditedChannelPost)
+		b.handle(OnEditedChannelPost, upd.EditedChannelPost, wg)
 		return
 	}
 
@@ -436,7 +439,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 						}
 
 						upd.Callback.Data = payload
-						b.runHandler(func() { handler(upd.Callback) })
+						b.runHandler(func() { handler(upd.Callback) }, wg)
 
 						return
 					}
@@ -450,7 +453,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 				panic("telebot: callback handler is bad")
 			}
 
-			b.runHandler(func() { handler(upd.Callback) })
+			b.runHandler(func() { handler(upd.Callback) }, wg)
 		}
 
 		return
@@ -463,7 +466,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 				panic("telebot: query handler is bad")
 			}
 
-			b.runHandler(func() { handler(upd.Query) })
+			b.runHandler(func() { handler(upd.Query) }, wg)
 		}
 
 		return
@@ -476,7 +479,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 				panic("telebot: chosen inline result handler is bad")
 			}
 
-			b.runHandler(func() { handler(upd.ChosenInlineResult) })
+			b.runHandler(func() { handler(upd.ChosenInlineResult) }, wg)
 		}
 
 		return
@@ -489,7 +492,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 				panic("telebot: shipping query handler is bad")
 			}
 
-			b.runHandler(func() { handler(upd.ShippingQuery) })
+			b.runHandler(func() { handler(upd.ShippingQuery) }, wg)
 		}
 
 		return
@@ -502,7 +505,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 				panic("telebot: pre checkout query handler is bad")
 			}
 
-			b.runHandler(func() { handler(upd.PreCheckoutQuery) })
+			b.runHandler(func() { handler(upd.PreCheckoutQuery) }, wg)
 		}
 
 		return
@@ -515,7 +518,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 				panic("telebot: poll handler is bad")
 			}
 
-			b.runHandler(func() { handler(upd.Poll) })
+			b.runHandler(func() { handler(upd.Poll) }, wg)
 		}
 
 		return
@@ -528,7 +531,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 				panic("telebot: poll answer handler is bad")
 			}
 
-			b.runHandler(func() { handler(upd.PollAnswer) })
+			b.runHandler(func() { handler(upd.PollAnswer) }, wg)
 		}
 
 		return
@@ -541,7 +544,7 @@ func (b *Bot) ProcessUpdate(upd Update) {
 				panic("telebot: my chat member handler is bad")
 			}
 
-			b.runHandler(func() { handler(upd.MyChatMember) })
+			b.runHandler(func() { handler(upd.MyChatMember) }, wg)
 		}
 
 		return
@@ -554,21 +557,21 @@ func (b *Bot) ProcessUpdate(upd Update) {
 				panic("telebot: chat member handler is bad")
 			}
 
-			b.runHandler(func() { handler(upd.ChatMember) })
+			b.runHandler(func() { handler(upd.ChatMember) }, wg)
 		}
 
 		return
 	}
 }
 
-func (b *Bot) handle(end string, m *Message) bool {
+func (b *Bot) handle(end string, m *Message, wg *sync.WaitGroup) bool {
 	if handler, ok := b.handlers[end]; ok {
 		handler, ok := handler.(func(*Message))
 		if !ok {
 			panic(fmt.Errorf("telebot: %s handler is bad", end))
 		}
 
-		b.runHandler(func() { handler(m) })
+		b.runHandler(func() { handler(m) }, wg)
 
 		return true
 	}
@@ -576,32 +579,32 @@ func (b *Bot) handle(end string, m *Message) bool {
 	return false
 }
 
-func (b *Bot) handleMedia(m *Message) bool {
+func (b *Bot) handleMedia(m *Message, wg *sync.WaitGroup) bool {
 	switch {
 	case m.Photo != nil:
-		b.handle(OnPhoto, m)
+		b.handle(OnPhoto, m, wg)
 	case m.Voice != nil:
-		b.handle(OnVoice, m)
+		b.handle(OnVoice, m, wg)
 	case m.Audio != nil:
-		b.handle(OnAudio, m)
+		b.handle(OnAudio, m, wg)
 	case m.Animation != nil:
-		b.handle(OnAnimation, m)
+		b.handle(OnAnimation, m, wg)
 	case m.Document != nil:
-		b.handle(OnDocument, m)
+		b.handle(OnDocument, m, wg)
 	case m.Sticker != nil:
-		b.handle(OnSticker, m)
+		b.handle(OnSticker, m, wg)
 	case m.Video != nil:
-		b.handle(OnVideo, m)
+		b.handle(OnVideo, m, wg)
 	case m.VideoNote != nil:
-		b.handle(OnVideoNote, m)
+		b.handle(OnVideoNote, m, wg)
 	case m.Contact != nil:
-		b.handle(OnContact, m)
+		b.handle(OnContact, m, wg)
 	case m.Location != nil:
-		b.handle(OnLocation, m)
+		b.handle(OnLocation, m, wg)
 	case m.Venue != nil:
-		b.handle(OnVenue, m)
+		b.handle(OnVenue, m, wg)
 	case m.Dice != nil:
-		b.handle(OnDice, m)
+		b.handle(OnDice, m, wg)
 	default:
 		return false
 	}

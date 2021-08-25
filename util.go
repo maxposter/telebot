@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
 	"log"
 	"net/http"
 	"strconv"
+	"sync"
+
+	"github.com/pkg/errors"
 )
 
 func (b *Bot) debug(err error) {
@@ -29,8 +31,9 @@ func (b *Bot) deferDebug() {
 	}
 }
 
-func (b *Bot) runHandler(handler func()) {
+func (b *Bot) runHandler(handler func(), wg *sync.WaitGroup) {
 	f := func() {
+		defer wg.Done()
 		defer b.deferDebug()
 		handler()
 	}
