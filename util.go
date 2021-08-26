@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/pkg/errors"
 	"log"
 	"net/http"
 	"strconv"
+
+	"github.com/pkg/errors"
 )
 
 func (b *Bot) debug(err error) {
@@ -31,6 +32,7 @@ func (b *Bot) deferDebug() {
 
 func (b *Bot) runHandler(handler func()) {
 	f := func() {
+		defer b.UpdatesWg.Done()
 		defer b.deferDebug()
 		handler()
 	}

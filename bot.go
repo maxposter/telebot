@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/pkg/errors"
 )
@@ -60,11 +61,12 @@ func NewBot(pref Settings) (*Bot, error) {
 
 // Bot represents a separate Telegram bot instance.
 type Bot struct {
-	Me      *User
-	Token   string
-	URL     string
-	Updates chan Update
-	Poller  Poller
+	Me        *User
+	Token     string
+	URL       string
+	Updates   chan Update
+	UpdatesWg sync.WaitGroup
+	Poller    Poller
 
 	handlers    map[string]interface{}
 	synchronous bool

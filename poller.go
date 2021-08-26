@@ -97,6 +97,7 @@ func (p *LongPoller) Poll(b *Bot, dest chan Update, stop chan struct{}) {
 	for {
 		select {
 		case <-stop:
+			b.UpdatesWg.Wait()
 			close(dest)
 			return
 		default:
@@ -108,6 +109,7 @@ func (p *LongPoller) Poll(b *Bot, dest chan Update, stop chan struct{}) {
 			b.debug(ErrCouldNotUpdate)
 			continue
 		}
+		b.UpdatesWg.Add(len(updates))
 
 		for _, update := range updates {
 			p.LastUpdateID = update.ID
